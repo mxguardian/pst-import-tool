@@ -8,9 +8,9 @@ Download the appropriate version for your platform from the [Releases](https://g
 
 | Platform | File |
 |----------|------|
-| macOS (Apple Silicon) | `pst-import` from `macos-arm64` |
-| Windows | `pst-import.exe` from `windows-amd64` |
-| Linux | `pst-import` from `linux-amd64` |
+| macOS (Apple Silicon) | `pst-import-macos-arm64` |
+| Windows | `pst-import.exe` |
+| Linux | `pst-import-linux-amd64` |
 
 ## Usage
 
