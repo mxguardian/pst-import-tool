@@ -1,0 +1,17 @@
+# Build output
+dist/
+pst-import
+*.exe
+
+# OS files
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Test/data files
+*.pst
+
+# Import state files
+*.pst-import-state
