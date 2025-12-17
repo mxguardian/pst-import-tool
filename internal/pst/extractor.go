@@ -176,6 +176,70 @@ func (e *Extractor) Process(
 	})
 }
 
+// ProcessContacts extracts contacts from Contacts folders in the PST file.
+func (e *Extractor) ProcessContacts(
+	onContact ContactCallback,
+	onProgress ProgressCallback,
+) error {
+	if e.pstFile == nil {
+		return fmt.Errorf("PST file not opened")
+	}
+
+	return e.pstFile.WalkFolders(func(folder *pst.Folder) error {
+		folderName := folder.Name
+
+		// Only process Contacts folders
+		if !strings.Contains(strings.ToLower(folderName), "contacts") {
+			return nil
+		}
+
+		// Get messages in this folder
+		messageIterator, err := folder.GetMessageIterator()
+		if err != nil {
+			return nil
+		}
+
+		if onProgress != nil {
+			onProgress(fmt.Sprintf("Processing: %s", folderName))
+		}
+
+		// Suppress stdout during Next() to silence go-pst library warnings
+		for func() bool { restore := suppressStdout(); defer restore(); return messageIterator.Next() }() {
+			msg := messageIterator.Value()
+
+			// Get the properties - only process Contact items
+			contactProps, ok := msg.Properties.(*properties.Contact)
+			if !ok {
+				continue
+			}
+
+			// Populate the Contact properties from the PST
+			if err := msg.PropertyContext.Populate(contactProps, msg.LocalDescriptors); err != nil {
+				continue
+			}
+
+			// Also populate Message properties (for mobile phone, etc.)
+			msgProps := &properties.Message{}
+			msg.PropertyContext.Populate(msgProps, msg.LocalDescriptors)
+
+			// Build Contact (pass PropertyContext and LocalDescriptors for named property access)
+			contact := buildContact(e.pstFile, msg.PropertyContext, msg.LocalDescriptors, contactProps, msgProps)
+			if contact == nil {
+				continue
+			}
+
+			// Call the contact callback
+			if onContact != nil {
+				if err := onContact(contact); err != nil {
+					return err
+				}
+			}
+		}
+
+		return messageIterator.Err()
+	})
+}
+
 // Close closes the PST file
 func (e *Extractor) Close() error {
 	if e.pstFile != nil {

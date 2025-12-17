@@ -6,6 +6,8 @@ require (
 	fyne.io/fyne/v2 v2.7.1
 	github.com/bits-and-blooms/bloom/v3 v3.7.1
 	github.com/emersion/go-imap v1.2.1
+	github.com/emersion/go-vcard v0.0.0-20230815062825-8fda7d206ec9
+	github.com/emersion/go-webdav v0.7.0
 	github.com/mooijtech/go-pst/v6 v6.0.2
 )
 

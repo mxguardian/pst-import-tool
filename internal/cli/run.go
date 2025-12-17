@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/mxguardian/pst-import-tool/internal/carddav"
 	"github.com/mxguardian/pst-import-tool/internal/imap"
 	"github.com/mxguardian/pst-import-tool/internal/pst"
 	"github.com/mxguardian/pst-import-tool/internal/state"
@@ -199,11 +200,66 @@ func Run(opts Options) {
 	}
 	fmt.Println()
 
-	if totalErrors == 0 {
+	// Sync contacts to CardDAV
+	contactsErrors := syncContacts(extractor, username, password)
+
+	// Clean up state only if no errors in email or contact sync
+	if totalErrors == 0 && contactsErrors == 0 {
 		importState.Clear()
 		fmt.Println("State cleaned up")
 	} else {
 		fmt.Printf("State saved to: %s\n", importState.StatePath())
 		fmt.Println("Run again to retry")
 	}
+}
+
+// syncContacts uploads contacts from the PST to CardDAV
+// Returns the number of errors encountered
+func syncContacts(extractor *pst.Extractor, username, password string) int {
+	fmt.Println("\nSyncing contacts...")
+
+	// Connect to CardDAV
+	cardDAVUploader, err := carddav.NewUploader(username, password)
+	if err != nil {
+		fmt.Printf("CardDAV connection failed: %v\n", err)
+		return 1
+	}
+	defer cardDAVUploader.Close()
+
+	var (
+		contactsUploaded int
+		contactsErrors   int
+	)
+
+	err = extractor.ProcessContacts(
+		func(contact *pst.Contact) error {
+			if err := cardDAVUploader.Upload(contact); err != nil {
+				contactsErrors++
+				return nil
+			}
+			contactsUploaded++
+			if contactsUploaded%10 == 0 {
+				fmt.Printf(".")
+			}
+			return nil
+		},
+		nil,
+	)
+
+	if err != nil {
+		fmt.Printf("\nError syncing contacts: %v\n", err)
+		contactsErrors++
+	}
+
+	if contactsUploaded > 0 || contactsErrors > 0 {
+		fmt.Printf("\nContacts: %d uploaded", contactsUploaded)
+		if contactsErrors > 0 {
+			fmt.Printf(", %d errors", contactsErrors)
+		}
+		fmt.Println()
+	} else {
+		fmt.Println("No contacts found")
+	}
+
+	return contactsErrors
 }

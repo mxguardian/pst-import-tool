@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/mxguardian/pst-import-tool/internal/carddav"
 	"github.com/mxguardian/pst-import-tool/internal/imap"
 	"github.com/mxguardian/pst-import-tool/internal/pst"
 )
@@ -277,11 +278,62 @@ func (a *App) runImport() {
 	a.setProgress(1.0)
 	a.log(fmt.Sprintf("Completed: %d messages uploaded, %d errors", totalUploaded, totalErrors))
 
+	// Sync contacts to CardDAV
+	contactsUploaded, contactsErrors := a.syncContacts(extractor)
+
 	fyne.Do(func() {
-		dialog.ShowInformation("Success",
-			fmt.Sprintf("PST import completed!\n%d messages uploaded", totalUploaded),
-			a.mainWindow)
+		msg := fmt.Sprintf("PST import completed!\n%d messages uploaded", totalUploaded)
+		if contactsUploaded > 0 {
+			msg += fmt.Sprintf("\n%d contacts synced", contactsUploaded)
+		}
+		if contactsErrors > 0 {
+			msg += fmt.Sprintf("\n%d contact errors", contactsErrors)
+		}
+		dialog.ShowInformation("Success", msg, a.mainWindow)
 	})
+}
+
+func (a *App) syncContacts(extractor *pst.Extractor) (uploaded, errors int) {
+	a.setStatus("Syncing contacts...")
+	a.log("Connecting to CardDAV...")
+
+	cardDAVUploader, err := carddav.NewUploader(a.usernameEntry.Text, a.passwordEntry.Text)
+	if err != nil {
+		a.log("CardDAV connection failed: " + err.Error())
+		return 0, 0
+	}
+	defer cardDAVUploader.Close()
+
+	err = extractor.ProcessContacts(
+		func(contact *pst.Contact) error {
+			select {
+			case <-a.cancel:
+				return fmt.Errorf("cancelled")
+			default:
+			}
+
+			if err := cardDAVUploader.Upload(contact); err != nil {
+				errors++
+				return nil
+			}
+			uploaded++
+			a.setStatus(fmt.Sprintf("Synced %d contacts...", uploaded))
+			return nil
+		},
+		nil,
+	)
+
+	if err != nil {
+		a.log("Contact sync error: " + err.Error())
+	}
+
+	if uploaded > 0 || errors > 0 {
+		a.log(fmt.Sprintf("Contacts: %d synced, %d errors", uploaded, errors))
+	} else {
+		a.log("No contacts found")
+	}
+
+	return uploaded, errors
 }
 
 func (a *App) setUIEnabled(enabled bool) {
