@@ -13,6 +13,40 @@ import (
 	"github.com/mooijtech/go-pst/v6/pkg/properties"
 )
 
+// suppressStdout temporarily redirects stdout to discard library warnings
+// Returns a function to restore stdout
+func suppressStdout() func() {
+	original := os.Stdout
+	os.Stdout, _ = os.Open(os.DevNull)
+	return func() {
+		os.Stdout = original
+	}
+}
+
+// nonEmailFolders contains folder names that don't hold email messages.
+// These are standard Outlook folders for non-email item types.
+var nonEmailFolders = map[string]bool{
+	"calendar":        true,
+	"contacts":        true,
+	"tasks":           true,
+	"notes":           true,
+	"journal":         true,
+	"drafts":          true,
+	"outbox":          true,
+	"sync issues":     true,
+	"conflicts":       true,
+	"local failures":  true,
+	"server failures": true,
+	"junk e-mail":     true,
+	"rss feeds":       true,
+	"conversation history": true,
+}
+
+// isNonEmailFolder checks if a folder name is a known non-email folder
+func isNonEmailFolder(name string) bool {
+	return nonEmailFolders[strings.ToLower(name)]
+}
+
 // Message represents an email message ready for upload
 type Message struct {
 	ID      string    // Message-ID for tracking
@@ -74,6 +108,11 @@ func (e *Extractor) Process(
 	return e.pstFile.WalkFolders(func(folder *pst.Folder) error {
 		folderName := folder.Name
 
+		// Skip non-email folders (Calendar, Contacts, Tasks, etc.)
+		if isNonEmailFolder(folderName) {
+			return nil
+		}
+
 		if onProgress != nil {
 			onProgress(fmt.Sprintf("Processing folder: %s", folderName))
 		}
@@ -96,7 +135,10 @@ func (e *Extractor) Process(
 			return nil
 		}
 
-		for messageIterator.Next() {
+		// Suppress stdout during Next() to silence go-pst library warnings like
+		// "Unmapped message class X, falling back to properties.Message..."
+		// These are informational only - the messages are still processed correctly.
+		for func() bool { restore := suppressStdout(); defer restore(); return messageIterator.Next() }() {
 			msg := messageIterator.Value()
 
 			// Get the properties - only process email messages
@@ -148,11 +190,21 @@ func (e *Extractor) Close() error {
 }
 
 // buildRFC822Message constructs an RFC822 email from PST message properties
+// Returns nil if the message has no body content (e.g., Outlook-only calendar objects)
 func buildRFC822Message(msg *properties.Message) ([]byte, string, time.Time) {
-	var buf bytes.Buffer
-
-	// Try to use original transport headers if available
+	// Get body content early - skip messages with no body
+	// This filters out Outlook-specific objects (meeting requests, calendar items, etc.)
+	// that have no meaningful email content
+	bodyText := msg.GetBody()
+	bodyHTML := msg.GetBodyHtml()
 	transportHeaders := msg.GetTransportMessageHeaders()
+
+	// If there's no body and no transport headers, this is likely an Outlook-only object
+	if bodyText == "" && bodyHTML == "" && transportHeaders == "" {
+		return nil, "", time.Time{}
+	}
+
+	var buf bytes.Buffer
 
 	// Get message metadata
 	messageID := msg.GetInternetMessageId()
@@ -179,10 +231,6 @@ func buildRFC822Message(msg *properties.Message) ([]byte, string, time.Time) {
 			}
 		}
 	}
-
-	// Get body content
-	bodyText := msg.GetBody()
-	bodyHTML := msg.GetBodyHtml()
 
 	if transportHeaders != "" {
 		// Use original headers, but we may need to add body
